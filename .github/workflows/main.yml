@@ -6,28 +6,19 @@ on:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Android (original)
+  # Android (kept for reference / APK artifacts)
   # ---------------------------------------------------------------------------
   android-debug:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
+          distribution: temurin
           java-version: '17'
-
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
-
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug
-
-      - name: Upload Debug APK
-        uses: actions/upload-artifact@v4
+      - run: chmod +x gradlew
+      - run: ./gradlew assembleDebug
+      - uses: actions/upload-artifact@v4
         with:
           name: apk-debug
           path: app/build/outputs/apk/debug
@@ -35,70 +26,97 @@ jobs:
   android-release:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
+          distribution: temurin
           java-version: '17'
-
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
-
-      - name: Build Release APK
-        run: ./gradlew assembleRelease
-
-      - name: Upload Release APK
-        uses: actions/upload-artifact@v4
+      - run: chmod +x gradlew
+      - run: ./gradlew assembleRelease
+      - uses: actions/upload-artifact@v4
         with:
           name: apk-release
           path: app/build/outputs/apk/release
 
   # ---------------------------------------------------------------------------
-  # PC Port (SDL2 + CMake)
+  # Windows x64 PC Port
   # ---------------------------------------------------------------------------
-  pc-port:
-    runs-on: ubuntu-latest
+  pc-windows-x64:
+    runs-on: windows-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Install SDL2 (vcpkg)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential cmake libsdl2-dev zip
+          vcpkg install sdl2:x64-windows
+          vcpkg integrate install
 
-      - name: Configure CMake
+      - name: Configure CMake (x64)
         working-directory: pc
         run: |
-          mkdir -p build
+          mkdir build
           cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Release
+          cmake .. -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" `
+            -DCMAKE_BUILD_TYPE=Release
 
-      - name: Build
+      - name: Build Release
         working-directory: pc/build
-        run: cmake --build . --config Release -j$(nproc)
+        run: cmake --build . --config Release -- /m
 
-      - name: Package PC port ZIP
+      - name: Verify PE machine type (x64)
+        working-directory: pc/build/Release
         run: |
-          mkdir -p dist/wmw-pc
-          cp pc/build/wmw_pc dist/wmw-pc/
-          # Original assets live here — keep them outside pc/src
-          cp -r app/src/main/assets dist/wmw-pc/assets
-          # Small run helper
-          cat > dist/wmw-pc/run.sh << 'EOF'
-          #!/usr/bin/env bash
-          cd "$(dirname "$0")"
-          ./wmw_pc ./assets
-          EOF
-          chmod +x dist/wmw-pc/run.sh dist/wmw-pc/wmw_pc
-          cd dist
-          zip -r wmw-pc-port.zip wmw-pc
+          $dump = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" /headers wmw_pc.exe 2>$null
+          if (-not $dump) {
+            # Fallback path search
+            $dumpbin = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Microsoft Visual Studio" -Recurse -Filter dumpbin.exe -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match 'Hostx64\\x64' } | Select-Object -First 1
+            if ($dumpbin) { $dump = & $dumpbin.FullName /headers wmw_pc.exe }
+          }
+          $dump | Out-String | Write-Host
+          if ($dump -notmatch '8664 machine \(x64\)') {
+            Write-Error "Binary is not x64 PE"
+            exit 1
+          }
+          Write-Host "OK: x64 PE confirmed"
 
-      - name: Upload PC Port ZIP
+      - name: Stage package
+        shell: pwsh
+        run: |
+          $out = "dist/wmw-pc-windows-x64"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Copy-Item "pc/build/Release/wmw_pc.exe" $out
+
+          # SDL2.dll from vcpkg
+          $sdlDll = Join-Path $env:VCPKG_INSTALLATION_ROOT "installed\x64-windows\bin\SDL2.dll"
+          if (Test-Path $sdlDll) {
+            Copy-Item $sdlDll $out
+          } else {
+            Write-Warning "SDL2.dll not found at $sdlDll — searching..."
+            Get-ChildItem -Path $env:VCPKG_INSTALLATION_ROOT -Recurse -Filter SDL2.dll -ErrorAction SilentlyContinue |
+              Select-Object -First 1 | ForEach-Object { Copy-Item $_.FullName $out }
+          }
+
+          # Assets (external to exe)
+          Copy-Item -Recurse "app/src/main/assets" "$out/assets"
+
+          # run.bat
+          @"
+          @echo off
+          cd /d "%~dp0"
+          wmw_pc.exe assets 01_CUT_FIRST
+          pause
+          "@ | Set-Content -Encoding ASCII "$out/run.bat"
+
+          Copy-Item "pc/README.md" "$out/README.md"
+          Copy-Item "pc/ARCHITECTURE.md" "$out/ARCHITECTURE.md"
+
+          Compress-Archive -Path "$out\*" -DestinationPath "dist/wmw-pc-windows-x64.zip" -Force
+
+      - name: Upload Windows x64 ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: wmw-pc-port
-          path: dist/wmw-pc-port.zip
+          name: wmw-pc-windows-x64
+          path: dist/wmw-pc-windows-x64.zip

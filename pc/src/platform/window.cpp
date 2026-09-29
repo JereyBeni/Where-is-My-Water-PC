@@ -1,4 +1,5 @@
 #include "platform/window.hpp"
+#include "platform/input.hpp"
 
 #include <SDL.h>
 #include <iostream>
@@ -10,7 +11,7 @@ Window::~Window() {
 }
 
 bool Window::create(const std::string& title, int width, int height) {
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0) {
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_TIMER) != 0) {
         std::cerr << "SDL_Init failed: " << SDL_GetError() << "\n";
         return false;
     }
@@ -23,14 +24,16 @@ bool Window::create(const std::string& title, int width, int height) {
         height,
         SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE
     );
-
     if (!window_) {
         std::cerr << "SDL_CreateWindow failed: " << SDL_GetError() << "\n";
         SDL_Quit();
         return false;
     }
 
-    renderer_ = SDL_CreateRenderer(window_, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    renderer_ = SDL_CreateRenderer(
+        window_, -1,
+        SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC
+    );
     if (!renderer_) {
         std::cerr << "SDL_CreateRenderer failed: " << SDL_GetError() << "\n";
         SDL_DestroyWindow(window_);
@@ -41,6 +44,12 @@ bool Window::create(const std::string& title, int width, int height) {
 
     width_ = width;
     height_ = height;
+
+    SDL_RendererInfo info{};
+    if (SDL_GetRendererInfo(renderer_, &info) == 0) {
+        std::cout << "[Window] renderer: " << info.name << "\n";
+    }
+    std::cout << "[Window] " << width_ << "x" << height_ << " (Windows x64 / SDL2)\n";
     return true;
 }
 
@@ -56,25 +65,26 @@ void Window::destroy() {
     SDL_Quit();
 }
 
-bool Window::pollEvents() {
+bool Window::pollEvents(Input& input) {
+    input.beginFrame();
+
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
         if (e.type == SDL_QUIT) {
+            input.setQuit(true);
             return false;
         }
         if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
             width_ = e.window.data1;
             height_ = e.window.data2;
         }
+        input.handleEvent(e);
     }
     return true;
 }
 
 void Window::swap() {
     if (renderer_) {
-        // Clear to a dark blue-ish color so we know the window is alive
-        SDL_SetRenderDrawColor(renderer_, 20, 40, 70, 255);
-        SDL_RenderClear(renderer_);
         SDL_RenderPresent(renderer_);
     }
 }

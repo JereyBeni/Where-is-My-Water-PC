@@ -7,6 +7,10 @@ struct SDL_Renderer;
 
 namespace wmw::platform {
 
+class Input;
+
+// [REIMPLEMENTED] SDL2 window + renderer host for Windows x64.
+// Replaces Android Activity + SurfaceView surface.
 class Window {
 public:
     Window() = default;
@@ -15,10 +19,11 @@ public:
     bool create(const std::string& title, int width, int height);
     void destroy();
 
-    // Returns false when the user requests quit
-    bool pollEvents();
+    // Pump OS events into Input. Returns false on SDL_QUIT.
+    bool pollEvents(Input& input);
     void swap();
 
+    SDL_Renderer* renderer() const { return renderer_; }
     int width() const { return width_; }
     int height() const { return height_; }
 
