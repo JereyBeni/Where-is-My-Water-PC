@@ -47,62 +47,110 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup MSVC x64 environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install Ninja
+        run: choco install ninja -y
+
       - name: Install SDL2 (vcpkg)
         run: |
           vcpkg install sdl2:x64-windows
           vcpkg integrate install
 
-      - name: Configure CMake (x64)
+      - name: Configure CMake (Ninja / x64 / Release)
         working-directory: pc
         run: |
-          mkdir build
-          cd build
-          cmake .. -G "Visual Studio 17 2022" -A x64 `
-            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" `
-            -DCMAKE_BUILD_TYPE=Release
+          cmake -B build -G Ninja `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows
 
-      - name: Build Release
-        working-directory: pc/build
-        run: cmake --build . --config Release -- /m
+      - name: Build
+        working-directory: pc
+        run: cmake --build build --config Release --parallel
 
       - name: Verify PE machine type (x64)
-        working-directory: pc/build/Release
+        working-directory: pc/build
+        shell: pwsh
         run: |
-          $dump = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" /headers wmw_pc.exe 2>$null
-          if (-not $dump) {
-            # Fallback path search
-            $dumpbin = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Microsoft Visual Studio" -Recurse -Filter dumpbin.exe -ErrorAction SilentlyContinue |
-              Where-Object { $_.FullName -match 'Hostx64\\x64' } | Select-Object -First 1
-            if ($dumpbin) { $dump = & $dumpbin.FullName /headers wmw_pc.exe }
-          }
-          $dump | Out-String | Write-Host
-          if ($dump -notmatch '8664 machine \(x64\)') {
-            Write-Error "Binary is not x64 PE"
+          if (-not (Test-Path "wmw_pc.exe")) {
+            Write-Error "wmw_pc.exe not found in pc/build"
+            Get-ChildItem -Recurse | Select-Object FullName
             exit 1
           }
-          Write-Host "OK: x64 PE confirmed"
+
+          $dumpbin = $null
+          $candidates = @()
+          if ($env:VCToolsInstallDir) {
+            $candidates += (Join-Path $env:VCToolsInstallDir "bin\Hostx64\x64\dumpbin.exe")
+          }
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (Test-Path $vswhere) {
+            $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+            if ($vsPath) {
+              $found = Get-ChildItem -Path "$vsPath\VC\Tools\MSVC" -Recurse -Filter dumpbin.exe -ErrorAction SilentlyContinue |
+                Where-Object { $_.FullName -match 'Hostx64\\x64\\dumpbin.exe$' } |
+                Select-Object -First 1
+              if ($found) { $candidates += $found.FullName }
+            }
+          }
+
+          foreach ($c in $candidates) {
+            if ($c -and (Test-Path $c)) { $dumpbin = $c; break }
+          }
+
+          if (-not $dumpbin) {
+            Write-Warning "dumpbin.exe not found — falling back to file header check"
+            $bytes = [System.IO.File]::ReadAllBytes("wmw_pc.exe")
+            # PE: e_lfanew at 0x3C, then PE signature, then Machine at +4
+            $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
+            $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+            Write-Host ("PE Machine = 0x{0:X4}" -f $machine)
+            if ($machine -ne 0x8664) {
+              Write-Error "Binary is not x64 PE (Machine=$machine)"
+              exit 1
+            }
+            Write-Host "OK: x64 PE confirmed (header Machine=0x8664)"
+          } else {
+            Write-Host "Using dumpbin: $dumpbin"
+            $headers = & $dumpbin /headers wmw_pc.exe | Out-String
+            Write-Host $headers
+            if ($headers -notmatch '8664 machine \(x64\)') {
+              Write-Error "Binary is not x64 PE"
+              exit 1
+            }
+            Write-Host "OK: x64 PE confirmed"
+          }
 
       - name: Stage package
         shell: pwsh
         run: |
           $out = "dist/wmw-pc-windows-x64"
           New-Item -ItemType Directory -Force -Path $out | Out-Null
-          Copy-Item "pc/build/Release/wmw_pc.exe" $out
+
+          $exe = "pc/build/wmw_pc.exe"
+          if (-not (Test-Path $exe)) {
+            $exe = Get-ChildItem -Path "pc/build" -Recurse -Filter wmw_pc.exe | Select-Object -First 1 -ExpandProperty FullName
+          }
+          Copy-Item $exe "$out/wmw_pc.exe"
 
           # SDL2.dll from vcpkg
           $sdlDll = Join-Path $env:VCPKG_INSTALLATION_ROOT "installed\x64-windows\bin\SDL2.dll"
           if (Test-Path $sdlDll) {
             Copy-Item $sdlDll $out
           } else {
-            Write-Warning "SDL2.dll not found at $sdlDll — searching..."
-            Get-ChildItem -Path $env:VCPKG_INSTALLATION_ROOT -Recurse -Filter SDL2.dll -ErrorAction SilentlyContinue |
-              Select-Object -First 1 | ForEach-Object { Copy-Item $_.FullName $out }
+            Write-Warning "SDL2.dll not at $sdlDll — searching vcpkg tree..."
+            $found = Get-ChildItem -Path $env:VCPKG_INSTALLATION_ROOT -Recurse -Filter SDL2.dll -ErrorAction SilentlyContinue |
+              Select-Object -First 1
+            if ($found) { Copy-Item $found.FullName $out }
+            else { Write-Error "SDL2.dll not found"; exit 1 }
           }
 
-          # Assets (external to exe)
           Copy-Item -Recurse "app/src/main/assets" "$out/assets"
 
-          # run.bat
           @"
           @echo off
           cd /d "%~dp0"
@@ -114,6 +162,7 @@ jobs:
           Copy-Item "pc/ARCHITECTURE.md" "$out/ARCHITECTURE.md"
 
           Compress-Archive -Path "$out\*" -DestinationPath "dist/wmw-pc-windows-x64.zip" -Force
+          Write-Host "Packaged dist/wmw-pc-windows-x64.zip"
 
       - name: Upload Windows x64 ZIP
         uses: actions/upload-artifact@v4
