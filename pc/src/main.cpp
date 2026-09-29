@@ -4,6 +4,7 @@
 #include "platform/input.hpp"
 #include "platform/filesystem.hpp"
 #include "platform/timer.hpp"
+#include "platform/splash.hpp"
 
 #include <iostream>
 #include <string>
@@ -24,7 +25,6 @@ static void printBanner() {
 
 int main(int argc, char* argv[]) {
 #ifdef _WIN32
-    // Ensure console UTF-8 friendly output on modern Windows
     SetConsoleOutputCP(CP_UTF8);
 #endif
 
@@ -35,7 +35,6 @@ int main(int argc, char* argv[]) {
         assetsRoot = argv[1];
     }
 
-    // Optional: second arg = level name without extension
     std::string levelName = "01_CUT_FIRST";
     if (argc > 2) {
         levelName = argv[2];
@@ -58,6 +57,15 @@ int main(int argc, char* argv[]) {
 
     wmw::platform::Input input;
     wmw::platform::Timer timer;
+
+    // Copyright splash FIRST (Drawing.png from commit d085394)
+    {
+        const std::string splashPath = wmw::platform::findCopyrightImagePath();
+        if (!wmw::platform::showCopyrightSplash(window, input, splashPath)) {
+            window.destroy();
+            return 0; // quit during splash
+        }
+    }
 
     wmw::core::Engine engine;
     if (!engine.init(assetsRoot)) {

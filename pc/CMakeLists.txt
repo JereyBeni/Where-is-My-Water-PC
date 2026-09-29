@@ -1,24 +1,24 @@
 cmake_minimum_required(VERSION 3.16)
-project(WMW_PC VERSION 0.2.0 LANGUAGES CXX)
+project(WMW_PC VERSION 0.2.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Force x64 on MSVC when possible
 if(MSVC)
     if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
         message(FATAL_ERROR "WMW PC port requires 64-bit (x64) build. Generator is ${CMAKE_GENERATOR}")
     endif()
 endif()
 
-# ---------------------------------------------------------------------------
-# SDL2
-# ---------------------------------------------------------------------------
-# Prefer CMake package (vcpkg / system). Fallback to SDL2_DIR.
 find_package(SDL2 CONFIG QUIET)
 if(NOT SDL2_FOUND)
     find_package(SDL2 REQUIRED)
+endif()
+
+find_package(SDL2_image CONFIG QUIET)
+if(NOT SDL2_image_FOUND)
+    find_package(SDL2_image REQUIRED)
 endif()
 
 set(WMW_SOURCES
@@ -29,6 +29,7 @@ set(WMW_SOURCES
     src/platform/timer.cpp
     src/platform/audio.cpp
     src/platform/renderer.cpp
+    src/platform/splash.cpp
     src/core/engine.cpp
     src/core/assets.cpp
     src/core/level_loader.cpp
@@ -52,15 +53,31 @@ else()
     target_link_libraries(wmw_pc PRIVATE ${SDL2_LIBRARIES})
 endif()
 
+if(TARGET SDL2_image::SDL2_image)
+    target_link_libraries(wmw_pc PRIVATE SDL2_image::SDL2_image)
+elseif(TARGET SDL2::SDL2_image)
+    target_link_libraries(wmw_pc PRIVATE SDL2::SDL2_image)
+else()
+    target_include_directories(wmw_pc PRIVATE ${SDL2_IMAGE_INCLUDE_DIRS})
+    target_link_libraries(wmw_pc PRIVATE ${SDL2_IMAGE_LIBRARIES})
+endif()
+
 if(MSVC)
     target_compile_options(wmw_pc PRIVATE /W4 /permissive- /Zc:__cplusplus)
-    # Windows subsystem console so we see logs during research builds
     target_link_options(wmw_pc PRIVATE /SUBSYSTEM:CONSOLE)
 else()
     target_compile_options(wmw_pc PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-# Output name always wmw_pc(.exe on Windows)
 set_target_properties(wmw_pc PROPERTIES OUTPUT_NAME "wmw_pc")
 
+# Copy copyright image next to the binary for local runs
+add_custom_command(TARGET wmw_pc POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/Drawing.png"
+        "$<TARGET_FILE_DIR:wmw_pc>/Drawing.png"
+    COMMENT "Copy Drawing.png (copyright splash) next to wmw_pc"
+)
+
 install(TARGETS wmw_pc RUNTIME DESTINATION bin)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/Drawing.png" DESTINATION bin)

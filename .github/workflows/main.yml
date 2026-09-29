@@ -5,9 +5,6 @@ on:
   push:
 
 jobs:
-  # ---------------------------------------------------------------------------
-  # Android (kept for reference / APK artifacts)
-  # ---------------------------------------------------------------------------
   android-debug:
     runs-on: ubuntu-latest
     steps:
@@ -38,9 +35,6 @@ jobs:
           name: apk-release
           path: app/build/outputs/apk/release
 
-  # ---------------------------------------------------------------------------
-  # Windows x64 PC Port (Swampy-only + optimized shared assets)
-  # ---------------------------------------------------------------------------
   pc-windows-x64:
     runs-on: windows-latest
     steps:
@@ -55,9 +49,9 @@ jobs:
       - name: Install Ninja
         run: choco install ninja -y
 
-      - name: Install SDL2 (vcpkg)
+      - name: Install SDL2 + SDL2_image (vcpkg)
         run: |
-          vcpkg install sdl2:x64-windows
+          vcpkg install sdl2:x64-windows sdl2-image:x64-windows
           vcpkg integrate install
 
       - name: Configure CMake (Ninja / x64 / Release)
@@ -82,49 +76,17 @@ jobs:
             exit 1
           }
 
-          $dumpbin = $null
-          $candidates = @()
-          if ($env:VCToolsInstallDir) {
-            $candidates += (Join-Path $env:VCToolsInstallDir "bin\Hostx64\x64\dumpbin.exe")
+          $bytes = [System.IO.File]::ReadAllBytes("wmw_pc.exe")
+          $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
+          $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+          Write-Host ("PE Machine = 0x{0:X4}" -f $machine)
+          if ($machine -ne 0x8664) {
+            Write-Error "Binary is not x64 PE (Machine=$machine)"
+            exit 1
           }
-          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          if (Test-Path $vswhere) {
-            $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-            if ($vsPath) {
-              $found = Get-ChildItem -Path "$vsPath\VC\Tools\MSVC" -Recurse -Filter dumpbin.exe -ErrorAction SilentlyContinue |
-                Where-Object { $_.FullName -match 'Hostx64\\x64\\dumpbin.exe$' } |
-                Select-Object -First 1
-              if ($found) { $candidates += $found.FullName }
-            }
-          }
+          Write-Host "OK: x64 PE confirmed"
 
-          foreach ($c in $candidates) {
-            if ($c -and (Test-Path $c)) { $dumpbin = $c; break }
-          }
-
-          if (-not $dumpbin) {
-            Write-Warning "dumpbin.exe not found — falling back to file header check"
-            $bytes = [System.IO.File]::ReadAllBytes("wmw_pc.exe")
-            $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
-            $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
-            Write-Host ("PE Machine = 0x{0:X4}" -f $machine)
-            if ($machine -ne 0x8664) {
-              Write-Error "Binary is not x64 PE (Machine=$machine)"
-              exit 1
-            }
-            Write-Host "OK: x64 PE confirmed (header Machine=0x8664)"
-          } else {
-            Write-Host "Using dumpbin: $dumpbin"
-            $headers = & $dumpbin /headers wmw_pc.exe | Out-String
-            Write-Host $headers
-            if ($headers -notmatch '8664 machine \(x64\)') {
-              Write-Error "Binary is not x64 PE"
-              exit 1
-            }
-            Write-Host "OK: x64 PE confirmed"
-          }
-
-      - name: Stage package (Swampy + optimized shared assets)
+      - name: Stage package
         shell: pwsh
         run: |
           $out = "dist/wmw-pc-windows-x64"
@@ -136,19 +98,24 @@ jobs:
           }
           Copy-Item $exe "$out/wmw_pc.exe"
 
-          $sdlDll = Join-Path $env:VCPKG_INSTALLATION_ROOT "installed\x64-windows\bin\SDL2.dll"
-          if (Test-Path $sdlDll) {
-            Copy-Item $sdlDll $out
-          } else {
-            $found = Get-ChildItem -Path $env:VCPKG_INSTALLATION_ROOT -Recurse -Filter SDL2.dll -ErrorAction SilentlyContinue |
-              Select-Object -First 1
-            if ($found) { Copy-Item $found.FullName $out }
-            else { Write-Error "SDL2.dll not found"; exit 1 }
+          # Runtime DLLs from vcpkg
+          $bin = Join-Path $env:VCPKG_INSTALLATION_ROOT "installed\x64-windows\bin"
+          foreach ($dll in @("SDL2.dll", "SDL2_image.dll", "libpng16.dll", "zlib1.dll")) {
+            $p = Join-Path $bin $dll
+            if (Test-Path $p) { Copy-Item $p $out }
+            else {
+              $found = Get-ChildItem -Path $env:VCPKG_INSTALLATION_ROOT -Recurse -Filter $dll -ErrorAction SilentlyContinue | Select-Object -First 1
+              if ($found) { Copy-Item $found.FullName $out }
+              elseif ($dll -eq "SDL2.dll" -or $dll -eq "SDL2_image.dll") {
+                Write-Error "$dll not found"; exit 1
+              }
+            }
           }
 
-          Copy-Item -Recurse "app/src/main/assets" "$out/assets"
+          # Copyright splash image (must sit next to exe)
+          Copy-Item "pc/Drawing.png" "$out/Drawing.png"
 
-          # 1) Character DLC strip  2) Shared size optimize
+          Copy-Item -Recurse "app/src/main/assets" "$out/assets"
           & "tools/strip_allie_cranky.ps1" -AssetsRoot "$out/assets"
           & "tools/optimize_shared_assets.ps1" -AssetsRoot "$out/assets"
 
