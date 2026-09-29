@@ -5,6 +5,7 @@
 
 #include <string>
 #include <vector>
+#include <unordered_map>
 
 namespace wmw::core {
 
@@ -13,7 +14,6 @@ namespace wmw::core {
 // Binary member layout [UNKNOWN].
 class Spout {
 public:
-    // Identity / debug
     std::string objectName;
     std::string hsPath;
 
@@ -22,31 +22,25 @@ public:
 
     float particlesPerSecond = 0.f; // [CONFIRMED] ParticlesPerSecond
     float particleSpeed = 0.f;      // [CONFIRMED] ParticleSpeed
-    int numberParticles = 0;        // [CONFIRMED] NumberParticles; -1 => infinite [INFERRED + setInfiniteParticles symbol]
+    int numberParticles = 0;        // [CONFIRMED] NumberParticles; -1 => infinite [INFERRED]
 
     Vec2 offsetToMouth;             // [CONFIRMED] OffsetToMouth "x y"
-    float expulsionAngleDeg = 0.f;  // [CONFIRMED] ExpulsionAngle (degrees in assets)
+    float expulsionAngleDeg = 0.f;  // [CONFIRMED] ExpulsionAngle
 
-    // World pose from level XML AbsoluteLocation + Angle [CONFIRMED level fields]
     Vec2 worldPos;
     float worldAngleDeg = 0.f;
 
-    bool infiniteParticles = false; // [INFERRED] from NumberParticles < 0 + setInfiniteParticles
+    bool infiniteParticles = false;
 
-    // Drain goal markers from .hs [CONFIRMED when present]
     bool isGoal = false;
     std::string goalPreset;
 
-    // Fill from merged property map (hs defaults + level overrides).
     void applyProperties(const std::unordered_map<std::string, std::string>& props);
 
-    // Emit based on real pps/speed/offsets. Returns newly spawned particles.
-    // Motion after emission is DEBUG only until Fluids solver is RE'd.
+    // [DEBUG] emission using file-backed rates; not Fluids solver
     std::vector<ParticleDescription> emit(float dt);
 
-    // Mouth position in world space (object pos + rotated offset) [INFERRED math]
     Vec2 mouthWorld() const;
-
     void log() const;
 
 private:
@@ -55,6 +49,3 @@ private:
 };
 
 } // namespace wmw::core
-
-// Need full map include for applyProperties signature in header consumers
-#include <unordered_map>
