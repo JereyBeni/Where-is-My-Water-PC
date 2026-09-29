@@ -7,6 +7,27 @@ Read **[ARCHITECTURE.md](ARCHITECTURE.md)** for binary analysis and status tags.
 
 ---
 
+## Content scope: Swampy-only
+
+For size/optimization the **PC ZIP artifact** ships **Swampy only**.
+
+| Kept | Removed from PC package |
+|------|-------------------------|
+| Swampy animations / audio / levels | Allie packs (~550 files) |
+| Shared Objects (incl. names with "cranky" used by Swampy levels) | Cranky packs (~335 files) |
+| Core Data / Sprites / Textures (shared) | Allie/Cranky UI Data XML, upsell art, DLC music |
+
+Local strip script (does not touch git history):
+
+```powershell
+.\tools\strip_allie_cranky.ps1 -AssetsRoot .\assets
+.\tools\strip_allie_cranky.ps1 -AssetsRoot .\app\src\main\assets -WhatIf
+```
+
+The full Android tree in the repo can still contain Allie/Cranky for research.
+
+---
+
 ## Build (Windows)
 
 ### Requirements
@@ -23,13 +44,13 @@ vcpkg install sdl2:x64-windows
 cd pc
 mkdir build
 cd build
-cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE=[vcpkg]/cmake\scripts\buildsystems\vcpkg.cmake
-cmake --build . --config Release
+cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=[vcpkg]\scripts\buildsystems\vcpkg.cmake
+cmake --build .
 ```
 
-Output: `Release\wmw_pc.exe` (or `wmw_pc.exe` depending on generator).
+Output: `wmw_pc.exe`.
 
-Verify PE x64 (Developer Command Prompt):
+Verify PE x64:
 ```powershell
 dumpbin /headers wmw_pc.exe | findstr machine
 ```
@@ -41,7 +62,7 @@ Expect: `8664 machine (x64)`.
 
 ```
 wmw_pc.exe
-assets\          ← copy from app/src/main/assets
+assets\          ← Swampy-oriented tree (see strip script)
 ```
 
 Or:
@@ -49,7 +70,7 @@ Or:
 .\wmw_pc.exe F:\path\to\assets 01_CUT_FIRST
 ```
 
-Controls: **Esc** quit. Mouse position tracked (dig not wired yet).
+Controls: **Esc** quit.
 
 ---
 
@@ -74,13 +95,15 @@ GitHub Actions (`windows-latest`) uploads:
 wmw-pc-windows-x64.zip
   wmw_pc.exe
   SDL2.dll
-  assets\n  run.bat
+  assets\          (Swampy-only after strip)
+  run.bat
   README.md
+  ARCHITECTURE.md
 ```
 
 ---
 
-## Hard rules (from project research)
+## Hard rules
 
 1. Never claim fidelity without evidence.
 2. Never run or rename ARM `.so` as Windows DLL.
