@@ -1,4 +1,4 @@
-# Where's My Water Decompile Project (WMWD or WMWDP)
+# Where's My Water Decompile Project (WMWD or WMWDP) For PC!
 
 You can download the built APK from the [Actions](https://github.com/TherCN/Where-is-My-Water/actions) tab, and you can also use [AIDE](https://android-ide.com) to clone this repository and manually compile it
 
