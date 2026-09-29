@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(WMW_PC VERSION 0.2.1 LANGUAGES CXX)
+project(WMW_PC VERSION 0.4.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -35,6 +35,9 @@ set(WMW_SOURCES
     src/core/level_loader.cpp
     src/core/physics_system.cpp
     src/core/water_system.cpp
+    src/core/particle_description.cpp
+    src/core/spout.cpp
+    src/core/hs_loader.cpp
 )
 
 add_executable(wmw_pc ${WMW_SOURCES})
@@ -71,7 +74,6 @@ endif()
 
 set_target_properties(wmw_pc PROPERTIES OUTPUT_NAME "wmw_pc")
 
-# Copy copyright image next to the binary for local runs
 add_custom_command(TARGET wmw_pc POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_CURRENT_SOURCE_DIR}/Drawing.png"
