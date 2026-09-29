@@ -39,7 +39,7 @@ jobs:
           path: app/build/outputs/apk/release
 
   # ---------------------------------------------------------------------------
-  # Windows x64 PC Port (Swampy-only assets in ZIP)
+  # Windows x64 PC Port (Swampy-only + optimized shared assets)
   # ---------------------------------------------------------------------------
   pc-windows-x64:
     runs-on: windows-latest
@@ -124,7 +124,7 @@ jobs:
             Write-Host "OK: x64 PE confirmed"
           }
 
-      - name: Stage package (Swampy-only assets)
+      - name: Stage package (Swampy + optimized shared assets)
         shell: pwsh
         run: |
           $out = "dist/wmw-pc-windows-x64"
@@ -146,9 +146,11 @@ jobs:
             else { Write-Error "SDL2.dll not found"; exit 1 }
           }
 
-          # Full assets copy, then strip Allie/Cranky for smaller Swampy-only ZIP
           Copy-Item -Recurse "app/src/main/assets" "$out/assets"
+
+          # 1) Character DLC strip  2) Shared size optimize
           & "tools/strip_allie_cranky.ps1" -AssetsRoot "$out/assets"
+          & "tools/optimize_shared_assets.ps1" -AssetsRoot "$out/assets"
 
           @"
           @echo off
@@ -162,7 +164,7 @@ jobs:
 
           Compress-Archive -Path "$out\*" -DestinationPath "dist/wmw-pc-windows-x64.zip" -Force
           $zipSize = [math]::Round((Get-Item "dist/wmw-pc-windows-x64.zip").Length / 1MB, 2)
-          Write-Host "Packaged dist/wmw-pc-windows-x64.zip ($zipSize MB) — Swampy-only assets"
+          Write-Host "Packaged dist/wmw-pc-windows-x64.zip ($zipSize MB)"
 
       - name: Upload Windows x64 ZIP
         uses: actions/upload-artifact@v4
