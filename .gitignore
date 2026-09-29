@@ -5,3 +5,12 @@
 /app/src/main/obj
 /app/src/main/jniLibs
 /app/src/main/libs
+
+# PC port
+/pc/build/
+/pc/cmake-build-*/
+/dist/
+*.o
+*.obj
+wmw_pc
+wmw_pc.exe
